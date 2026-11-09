@@ -121,4 +121,95 @@ U1: OVERLAY_RESET --->| RESET / SECTOR_CLEAR_LINE  |
    * Host initiates authenticated update handshake with `U1`.
    * `U1:GPIO_1` is pulled **HIGH**, releasing hardware write-protect on Tier 1.
    * Baseline image is refreshed, `U1:GPIO_1` drops back **LOW**, and Tier 2 is cleared.
+## Appendix: System-Writable Milestone & Update Bank (Tier 1.5)
+
+To allow the system itself to download, manage, and flash alternative version milestones or rollback updates without risking the factory base cartridge, the architecture incorporates an intermediate **Tier 1.5: System-Writable Update Bank**. 
+
+Unlike the permanently locked Base Cartridge (Tier 1) and the temporary runtime scratchpad (Tier 2), this bank is flashable by the host system under strict, MCU-gated cryptographic handshake rules. It provides a persistent, updatable fallback environment that is protected from arbitrary or accidental software corruption.
+
+---
+
+## Architecture Diagram (Tier 1.5 Integration)
+
+```
++--------------------------------------------------------------------------+
+|                          SYSTEM CONTROL HOST                             |
+|              (Main Application Processor / OS / Console)                 |
++--------------------------------------------------------------------------+
+|                                           |
+| Read / Unprivileged Exec                  | System Update Command Bus
+v                                           v
++-------------------------------+         +--------------------------------+
+|     TIER 1: BASE CARTRIDGE    |         |    TIER 1.5: UPDATE BANK ROM   |
+|   (Permanently Hardware-Locked)|        |    (System-Writable Milestone) |
+|                               |         |                                |
+|  - Factory Compressed Master  |         |  - Flashed via OS Handshake    |
+|  - Unwritable by Software     |         |  - MCU-Gated Write-Protect     |
++-------------------------------+         +--------------------------------+
+^                                           ^
+| Hard-Grounded / Fixed                     | MCU-Gated Write Control
++-------------------+     +-----------------+
+|     |
+v     v
++------------------------------------+
+|      MICROCONTROLLER / CPLD        |
+|     (e.g., RP2040 / Supervisor)    |
+|                                    |
+|  - Intercepts Update Handshake     |
+|  - Temporarily toggles WP_1.5    |
+|  - Manages Boot-Select Priority    |
++------------------------------------+
+```
+---
+
+## Circuit Schematic & Control Interconnect
+
+```
+================================================================================
+U1: RP2040 MCU
++----------------------------+
+| GPIO_0 <--- REVERT_BTN     |
+| GPIO_1 <--- BOOT_SEL_BTN   |  (Selects Base vs. Update)
+| GPIO_2 <--- UPDATE_REQ_RX  |  (Serial/SPI host update trigger)
+|                            |
+| GPIO_3 ---> WP_CTRL_1      |---> (To U2: Tier 1 WP# [Hard Tied LOW])
+| GPIO_4 ---> WP_CTRL_1.5    |---> (To U3: Tier 1.5 WP# [Gated])
++----------------------------+
+================================================================================
+U2: TIER 1 BASE CARTRIDGE (Immutable Factory ROM)
++----------------------------+
+Host Bus      --->| DATA / SPI INTERFACE       |
+U1: WP_CTRL_3   --->| WP#  (Tied LOW / Permanent)|
++----------------------------+
+================================================================================
+U3: TIER 1.5 UPDATE BANK (System-Writable Milestone ROM)
++----------------------------+
+Host Bus      --->| DATA / SPI INTERFACE       |
+U1: WP_CTRL_4    --->| WP#  (Gated Software-Lock) |
++----------------------------+
+```
+---
+
+## Signal Mapping & Access Rights
+
+| Component | Pin | Signal Name | Target Connection | Functional Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **U1 (MCU)** | `GPIO_2` | `UPDATE_REQ` | Host Processor | Listens for authorized flash requests from the host OS. |
+| **U1 (MCU)** | `GPIO_4` | `WP_1.5` | `U3: Pin 3 (WP#)` | Dynamically lifts hardware write-protection on Tier 1.5 only during verified updates. |
+| **U3 (Update Bank)**| `WP#` | `GATED_LOCK` | `U1: GPIO_4` | When LOW, update block is read-only. When pulsed HIGH by MCU, accepts new milestone binary. |
+
+---
+
+## Safe In-System Update Workflow
+
+1. **Restricted Default State:**
+   * Both Tier 1 (Base) and Tier 1.5 (Update Bank) default to write-protected states (`WP#` held LOW by the supervisor MCU). The system can boot freely from either, but cannot modify code on either.
+2. **Authorized Milestone Flashing:**
+   * When a user downloads an official update or alternative version milestone, the host OS sends a signed flash package and a control packet to `U1:GPIO_2` (`UPDATE_REQ`).
+   * The MCU verifies the cryptographic signature of the update payload.
+   * If valid, the MCU drives `U1:GPIO_4` **HIGH**, temporarily releasing the write-protect pin on Tier 1.5 (while Tier 1 remains locked).
+   * The host writes the new compressed milestone image directly to Tier 1.5.
+3. **Immediate Re-Locking:**
+   * Once writing completes and verification checksums pass, the MCU instantly pulls `U1:GPIO_4` back **LOW**, returning the milestone update ROM to a secure read-only state until the next version cycle.
+
 
