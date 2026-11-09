@@ -10,7 +10,7 @@ A dedicated hardware call (tactile switch trigger) instantly wipes the overlay p
 
 ## Architecture Diagram
 
-'''
+```
 +--------------------------------------------------------------------------+
 |                          SYSTEM CONTROL HOST                             |
 |              (Main Application Processor / SBC / Console)                |
@@ -44,12 +44,12 @@ v     v
 |
 [ HW REVERT TRIGGER ]
 (Physical Tactile Switch)
-'''
+```
 ---
 
 ## Circuit Schematic (ASCII Netlist)
 
-'''
+```
 VCC_3V3
 |
 +---+
@@ -87,7 +87,7 @@ Host Data Bus ===>| DATA / CTRL INTERFACE      |
 |                            |
 U1: OVERLAY_RESET --->| RESET / SECTOR_CLEAR_LINE  |
 +----------------------------+
-'''
+```
 ---
 
 ## Component Pinout & Signal Mapping
